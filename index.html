@@ -236,6 +236,36 @@
             color: var(--text-main);
         }
 
+        .action-buttons {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+        
+        button.secondary {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            border: 1px solid var(--border-color);
+        }
+        button.secondary:hover {
+            background-color: #e2e8f0;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            button.secondary:hover {
+                background-color: #334155;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .action-buttons button {
+                padding: 0.4rem 0.5rem;
+                font-size: 0.75rem;
+            }
+        }
+
         /* HTML Preview Area */
         #html-preview {
             flex: 1;
@@ -357,10 +387,16 @@
                 <button id="tab-markdown" class="active">Markdown</button>
                 <button id="tab-preview">プレビュー</button>
             </div>
-            <button id="btn-copy">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                Markdownをコピー
-            </button>
+            <div class="action-buttons">
+                <button id="btn-save-txt" class="secondary" title="テキスト(.txt)として保存">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                    TXT
+                </button>
+                <button id="btn-copy">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                    コピー
+                </button>
+            </div>
         </div>
         <div id="error-msg" class="error-message"></div>
         <textarea id="output-text" readonly placeholder="ここにMarkdownが出力されます..."></textarea>
@@ -405,6 +441,7 @@
         tabMd: getEl('tab-markdown'),
         tabPrev: getEl('tab-preview'),
         btnCopy: getEl('btn-copy'),
+        btnSaveTxt: getEl('btn-save-txt'),
         
         optDelim: getEl('set-delimiter'),
         optAlign: getEl('set-align'),
@@ -760,6 +797,26 @@
             console.error('Copy failed', err);
             alert('クリップボードへのコピーに失敗しました。テキストエリアを選択して手動でコピーしてください。');
         }
+    });
+
+    // --- ファイルダウンロード処理 ---
+    function downloadFile(content, filename, mimeType) {
+        const blob = new Blob([content], { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    // TXTとして保存
+    addEvt('btn-save-txt', 'click', () => {
+        if (!els.output || !els.output.value) return;
+        const textToSave = els.output.value;
+        downloadFile(textToSave, 'table_markdown.txt', 'text/plain;charset=utf-8');
     });
 
     // Tabs
