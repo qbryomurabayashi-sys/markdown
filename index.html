@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' data: blob:; connect-src 'none';">
+    <title>CSV ➔ Markdown 変換ツール</title>
+    <style>
+        :root {
+            --bg-color: #f8fafc;
+            --pane-bg: #ffffff;
+            --text-main: #1e293b;
+            --text-muted: #64748b;
+            --border-color: #cbd5e1;
+            --primary: #3b82f6;
+            --primary-hover: #2563eb;
+            --danger: #ef4444;
+            --danger-hover: #dc2626;
+            --success: #10b981;
+            --font-main: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            --radius: 8px;
+            --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            --header-height: 3rem;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg-color: #0f172a;
+                --pane-bg: #1e293b;
+                --text-main: #f8fafc;
+                --text-muted: #94a3b8;
+                --border-color: #334155;
+            }
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            font-family: var(--font-main);
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            overflow: hidden; /* 全体スクロール禁止 */
+        }
+
+        header {
+            height: var(--header-height);
+            display: flex;
+            align-items: center;
+            padding: 0 1rem;
+            background-color: var(--pane-bg);
+            border-bottom: 1px solid var(--border-color);
+            font-weight: 600;
+            font-size: 1.2rem;
+            flex-shrink: 0;
+        }
+
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0; /* Flexboxの縮小バグ防止 */
+        }
+
+        /* 画面幅が広い場合は左右分割 */
+        @media (min-width: 768px) {
+            .main-content {
+                flex-direction: row;
+            }
+        }
+
+        .pane {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            min-width: 0;
+            padding: 1rem;
+            overflow-y: auto; /* ペイン内でスクロール */
+            gap: 1rem;
+        }
+
+        .input-pane {
+            background-color: var(--bg-color);
+            border-right: 1px solid var(--border-color);
+        }
+
+        .output-pane {
+            background-color: var(--pane-bg);
+            position: relative;
+        }
+
+        .toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            align-items: center;
+        }
+
+        button {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: var(--radius);
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            background-color: var(--primary);
+            color: white;
+            transition: background-color 0.2s;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.25rem;
+        }
+
+        button:hover { background-color: var(--primary-hover); }
+        button.danger { background-color: var(--danger); }
+        button.danger:hover { background-color: var(--danger-hover); }
+        button.success { background-color: var(--success); }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* ファイル入力隠し */
+        #file-input { display: none; }
+
+        .settings-panel {
+            background-color: var(--pane-bg);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            padding: 0.75rem;
+            box-shadow: var(--shadow);
+        }
+
+        .settings-panel summary {
+            font-weight: 600;
+            cursor: pointer;
+            user-select: none;
+            color: var(--text-main);
+        }
+
+        .settings-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 0.75rem;
+            margin-top: 1rem;
+            font-size: 0.875rem;
+        }
+
+        .setting-item {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .setting-item.checkbox {
+            flex-direction: row;
+            align-items: center;
+        }
+
+        label { color: var(--text-main); }
+        
+        select, input[type="text"] {
+            padding: 0.4rem;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: inherit;
+        }
+
+        textarea {
+            flex: 1;
+            width: 100%;
+            min-height: 150px;
+            padding: 0.75rem;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            background-color: var(--pane-bg);
+            color: var(--text-main);
+            font-family: var(--font-mono);
+            font-size: 0.875rem;
+            resize: none;
+            line-height: 1.5;
+            white-space: pre;
+            overflow: auto;
+        }
+
+        textarea:focus {
+            outline: 2px solid var(--primary);
+            outline-offset: -1px;
+        }
+
+        /* Sticky Output Header */
+        .sticky-header {
+            position: sticky;
+            top: 0;
+            /* 親のpaddingを打ち消して全幅に */
+            margin: -1rem -1rem 0 -1rem;
+            padding: 1rem;
+            background-color: var(--pane-bg);
+            z-index: 10;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border-color);
+            box-shadow: 0 2px 4px -2px rgb(0 0 0 / 0.05);
+        }
+
+        /* タブ切り替え */
+        .view-tabs {
+            display: flex;
+            background-color: var(--bg-color);
+            border-radius: var(--radius);
+            padding: 0.25rem;
+            border: 1px solid var(--border-color);
+        }
+
+        .view-tabs button {
+            background: transparent;
+            color: var(--text-muted);
+            border-radius: 4px;
+            padding: 0.25rem 0.75rem;
+        }
+
+        .view-tabs button.active {
+            background-color: var(--pane-bg);
+            color: var(--text-main);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .view-tabs button:hover:not(.active) {
+            color: var(--text-main);
+        }
+
+        /* HTML Preview Area */
+        #html-preview {
+            flex: 1;
+            overflow: auto;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            padding: 1rem;
+            background-color: var(--pane-bg);
+            display: none; /* 初期は非表示 */
+        }
+
+        #html-preview.active {
+            display: block;
+        }
+
+        #output-text.hidden {
+            display: none;
+        }
+
+        /* Markdown Preview Table Styles */
+        #html-preview table {
+            border-collapse: collapse;
+            width: 100%;
+            margin-bottom: 1rem;
+            font-size: 0.875rem;
+        }
+        #html-preview th, #html-preview td {
+            border: 1px solid var(--border-color);
+            padding: 0.5rem;
+        }
+        #html-preview th {
+            background-color: var(--bg-color);
+            font-weight: 600;
+        }
+        #html-preview tr:nth-child(even) {
+            background-color: rgba(0,0,0,0.02);
+        }
+
+        .error-message {
+            color: var(--danger);
+            font-size: 0.875rem;
+            margin-top: 0.5rem;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    CSV ➔ Markdown 変換ツール
+</header>
+
+<main class="main-content">
+    <!-- 入力ペイン -->
+    <section class="pane input-pane">
+        <div class="toolbar">
+            <button id="btn-import">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                ファイル読み込み
+            </button>
+            <input type="file" id="file-input" accept=".csv,.tsv,.txt">
+            <button id="btn-clear" class="danger">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                クリア
+            </button>
+            <button id="btn-convert" style="margin-left: auto;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                変換
+            </button>
+        </div>
+
+        <details class="settings-panel" open>
+            <summary>設定</summary>
+            <div class="settings-grid">
+                <div class="setting-item">
+                    <label for="set-delimiter">区切り文字</label>
+                    <select id="set-delimiter">
+                        <option value="auto">自動判定</option>
+                        <option value=",">カンマ (,)</option>
+                        <option value="&#9;">タブ (Tab)</option>
+                        <option value=";">セミコロン (;)</option>
+                    </select>
+                </div>
+                <div class="setting-item">
+                    <label for="set-align">文字揃え</label>
+                    <select id="set-align">
+                        <option value="none">指定なし (---)</option>
+                        <option value="left">左揃え (:---)</option>
+                        <option value="center">中央揃え (:---:)</option>
+                        <option value="right">右揃え (---:)</option>
+                    </select>
+                </div>
+                <div class="setting-item checkbox">
+                    <input type="checkbox" id="set-header-row" checked>
+                    <label for="set-header-row">1行目をヘッダーにする</label>
+                </div>
+                <div class="setting-item checkbox">
+                    <input type="checkbox" id="set-header-col">
+                    <label for="set-header-col">1列目をヘッダーにする (太字)</label>
+                </div>
+                <div class="setting-item checkbox">
+                    <input type="checkbox" id="set-escape-newline" checked>
+                    <label for="set-escape-newline">セル内の改行を &lt;br&gt; に変換</label>
+                </div>
+                <div class="setting-item checkbox">
+                    <input type="checkbox" id="set-keep-whitespace">
+                    <label for="set-keep-whitespace">前後の空白を保持する</label>
+                </div>
+            </div>
+        </details>
+
+        <textarea id="input-text" placeholder="ここにCSV、TSV、またはExcelのデータを貼り付けてください..."></textarea>
+    </section>
+
+    <!-- 出力ペイン -->
+    <section class="pane output-pane">
+        <div class="sticky-header">
+            <div class="view-tabs">
+                <button id="tab-markdown" class="active">Markdown</button>
+                <button id="tab-preview">プレビュー</button>
+            </div>
+            <button id="btn-copy">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                Markdownをコピー
+            </button>
+        </div>
+        <div id="error-msg" class="error-message"></div>
+        <textarea id="output-text" readonly placeholder="ここにMarkdownが出力されます..."></textarea>
+        <div id="html-preview"></div>
+    </section>
+</main>
+
+<script>
+    /**
+     * エッジケーステストデータ (開発・確認用)
+     * * [カンマ/タブ混在と引用符内改行のテスト]
+     * id,name,description
+     * 1,"Apple, Inc.","A tech company
+     * based in Cupertino"
+     * 2,Banana,"Contains ""quotes"" inside"
+     * 3,Cherry,
+     * * [パイプを含むデータのテスト]
+     * Col A,Col B
+     * a|b,c\|d
+     */
+
+    // --- DOM Utility Functions ---
+    function getEl(id) {
+        const el = document.getElementById(id);
+        if (!el) console.warn(`Element ID '${id}' not found.`);
+        return el;
+    }
+
+    function addEvt(id, event, handler) {
+        const el = getEl(id);
+        if (el) el.addEventListener(event, handler);
+    }
+
+    // --- State & DOM Elements ---
+    const els = {
+        input: getEl('input-text'),
+        output: getEl('output-text'),
+        preview: getEl('html-preview'),
+        fileInput: getEl('file-input'),
+        errorMsg: getEl('error-msg'),
+        
+        tabMd: getEl('tab-markdown'),
+        tabPrev: getEl('tab-preview'),
+        btnCopy: getEl('btn-copy'),
+        
+        optDelim: getEl('set-delimiter'),
+        optAlign: getEl('set-align'),
+        optHeaderRow: getEl('set-header-row'),
+        optHeaderCol: getEl('set-header-col'),
+        optEscapeNl: getEl('set-escape-newline'),
+        optKeepWs: getEl('set-keep-whitespace')
+    };
+
+    let currentView = 'markdown'; // 'markdown' | 'preview'
+    let currentData2D = [];
+
+    // --- CSV Parser (RFC 4180 compliant) ---
+    function guessDelimiter(text) {
+        if (!text) return ',';
+        const sample = text.substring(0, 1000); // 最初の1000文字で判定
+        
+        // タブが含まれていれば、Excelからのコピペ等の可能性が高いのでタブを優先
+        if (sample.includes('\t')) {
+            const lines = sample.split(/\r?\n/);
+            if (lines.length > 0 && lines[0].includes('\t')) return '\t';
+        }
+
+        const delimiters = [',', ';', '\t'];
+        let bestDelim = ',';
+        let maxCols = 0;
+
+        for (const delim of delimiters) {
+            // 簡易判定：1行目の列数を数える
+            const firstLine = sample.split(/\r?\n/)[0];
+            const cols = firstLine.split(delim).length;
+            if (cols > maxCols && cols > 1) {
+                maxCols = cols;
+                bestDelim = delim;
+            }
+        }
+        return bestDelim;
+    }
+
+    function parseCSV(text, delimiter) {
+        const result = [];
+        let currentRow = [];
+        let currentCell = '';
+        let inQuotes = false;
+
+        // BOMの除去
+        text = text.replace(/^\uFEFF/, '');
+
+        for (let i = 0; i < text.length; i++) {
+            const char = text[i];
+            const nextChar = text[i + 1];
+
+            if (inQuotes) {
+                if (char === '"' && nextChar === '"') {
+                    currentCell += '"';
+                    i++; // エスケープされたクォートをスキップ
+                } else if (char === '"') {
+                    inQuotes = false;
+                } else {
+                    currentCell += char;
+                }
+            } else {
+                if (char === '"') {
+                    inQuotes = true;
+                } else if (char === delimiter) {
+                    currentRow.push(currentCell);
+                    currentCell = '';
+                } else if (char === '\n' || (char === '\r' && nextChar === '\n')) {
+                    currentRow.push(currentCell);
+                    result.push(currentRow);
+                    currentRow = [];
+                    currentCell = '';
+                    if (char === '\r') i++; // CRLFの\nをスキップ
+                } else if (char === '\r') {
+                    // CRのみの改行
+                    currentRow.push(currentCell);
+                    result.push(currentRow);
+                    currentRow = [];
+                    currentCell = '';
+                } else {
+                    currentCell += char;
+                }
+            }
+        }
+
+        // 最後のセルと行をプッシュ
+        currentRow.push(currentCell);
+        // 完全に空の行（末尾の改行のみ等）は無視する
+        if (currentRow.length > 1 || currentRow[0] !== '') {
+            result.push(currentRow);
+        }
+
+        return result;
+    }
+
+    // --- Markdown Generation ---
+    function getOptions() {
+        return {
+            delimiter: els.optDelim?.value || 'auto',
+            align: els.optAlign?.value || 'none',
+            hasHeaderRow: els.optHeaderRow?.checked ?? true,
+            hasHeaderCol: els.optHeaderCol?.checked ?? false,
+            escapeNewline: els.optEscapeNl?.checked ?? true,
+            keepWhitespace: els.optKeepWs?.checked ?? false
+        };
+    }
+
+    function escapeCellContent(cell, opts) {
+        let str = String(cell);
+        
+        // パイプのエスケープ
+        str = str.replace(/\|/g, '\\|');
+        
+        // 改行の処理
+        if (opts.escapeNewline) {
+            str = str.replace(/\r?\n/g, '<br>');
+        } else {
+            str = str.replace(/\r?\n/g, ' ');
+        }
+
+        // 空白の保持
+        if (opts.keepWhitespace) {
+            // 連続するスペースや前後のスペースを&nbsp;に置換してMarkdownのトリムを防ぐ
+            str = str.replace(/ {2,}/g, match => '&nbsp;'.repeat(match.length));
+            if (str.startsWith(' ')) str = '&nbsp;' + str.substring(1);
+            if (str.endsWith(' ')) str = str.substring(0, str.length - 1) + '&nbsp;';
+        } else {
+            str = str.trim();
+        }
+
+        return str;
+    }
+
+    function processData() {
+        if (!els.input || !els.output || !els.errorMsg) return;
+
+        const text = els.input.value;
+        if (!text.trim()) {
+            els.output.value = '';
+            els.preview.innerHTML = '';
+            currentData2D = [];
+            els.errorMsg.style.display = 'none';
+            return;
+        }
+
+        try {
+            const opts = getOptions();
+            let delim = opts.delimiter;
+            if (delim === 'auto') {
+                delim = guessDelimiter(text);
+            }
+
+            currentData2D = parseCSV(text, delim);
+            
+            // 列数の正規化（最大列数に合わせる）
+            let maxCols = 0;
+            currentData2D.forEach(row => {
+                if (row.length > maxCols) maxCols = row.length;
+            });
+
+            currentData2D = currentData2D.map(row => {
+                const newRow = [...row];
+                while (newRow.length < maxCols) {
+                    newRow.push('');
+                }
+                return newRow;
+            });
+
+            els.errorMsg.style.display = 'none';
+            renderOutput();
+            
+        } catch (err) {
+            console.error(err);
+            els.errorMsg.textContent = 'データの解析エラー: ' + err.message;
+            els.errorMsg.style.display = 'block';
+        }
+    }
+
+    function renderOutput() {
+        if (!currentData2D || currentData2D.length === 0) {
+            els.output.value = '';
+            els.preview.innerHTML = '';
+            return;
+        }
+
+        const opts = getOptions();
+        const maxCols = currentData2D[0].length;
+        
+        // Generate Markdown
+        const mdRows = [];
+        let headerData = [];
+        let startIndex = 0;
+
+        if (opts.hasHeaderRow) {
+            headerData = currentData2D[0];
+            startIndex = 1;
+        } else {
+            for (let i = 0; i < maxCols; i++) headerData.push(`列 ${i + 1}`);
+        }
+
+        const escapedHeader = headerData.map(c => escapeCellContent(c, opts));
+        mdRows.push(`| ${escapedHeader.join(' | ')} |`);
+
+        let alignStr = '---';
+        if (opts.align === 'left') alignStr = ':---';
+        else if (opts.align === 'center') alignStr = ':---:';
+        else if (opts.align === 'right') alignStr = '---:';
+
+        const alignRow = Array(maxCols).fill(alignStr);
+        mdRows.push(`| ${alignRow.join(' | ')} |`);
+
+        for (let i = startIndex; i < currentData2D.length; i++) {
+            const escapedRow = currentData2D[i].map((cell, colIndex) => {
+                let val = escapeCellContent(cell, opts);
+                if (opts.hasHeaderCol && colIndex === 0 && val !== '') {
+                    val = `**${val}**`;
+                }
+                return val;
+            });
+            mdRows.push(`| ${escapedRow.join(' | ')} |`);
+        }
+
+        els.output.value = mdRows.join('\n');
+
+        // Generate HTML Preview
+        if (currentView === 'preview') {
+            generateHTMLPreview(escapedHeader, currentData2D, startIndex, opts);
+        }
+    }
+
+    function generateHTMLPreview(headerRow, data, startIndex, opts) {
+        let html = '<table><thead><tr>';
+        
+        let alignStyle = '';
+        if (opts.align === 'left') alignStyle = ' style="text-align: left;"';
+        else if (opts.align === 'center') alignStyle = ' style="text-align: center;"';
+        else if (opts.align === 'right') alignStyle = ' style="text-align: right;"';
+
+        headerRow.forEach(c => {
+            html += `<th${alignStyle}>${c}</th>`;
+        });
+        html += '</tr></thead><tbody>';
+
+        for (let i = startIndex; i < data.length; i++) {
+            html += '<tr>';
+            data[i].forEach((cell, colIndex) => {
+                let val = escapeCellContent(cell, opts);
+                // HTMLプレビューではMarkdownの**を展開しないので、スタイルで対応
+                if (opts.hasHeaderCol && colIndex === 0) {
+                    html += `<td${alignStyle}><strong>${val}</strong></td>`;
+                } else {
+                    html += `<td${alignStyle}>${val}</td>`;
+                }
+            });
+            html += '</tr>';
+        }
+        html += '</tbody></table>';
+        els.preview.innerHTML = html;
+    }
+
+    // --- UI Interactions ---
+    function switchView(view) {
+        if (!els.tabMd || !els.tabPrev || !els.output || !els.preview) return;
+        currentView = view;
+        
+        if (view === 'markdown') {
+            els.tabMd.classList.add('active');
+            els.tabPrev.classList.remove('active');
+            els.output.classList.remove('hidden');
+            els.preview.classList.remove('active');
+        } else {
+            els.tabMd.classList.remove('active');
+            els.tabPrev.classList.add('active');
+            els.output.classList.add('hidden');
+            els.preview.classList.add('active');
+            renderOutput(); // プレビュー生成
+        }
+    }
+
+    // --- Event Listeners ---
+    addEvt('input-text', 'input', processData);
+    
+    // Setting changes trigger re-render
+    ['set-delimiter', 'set-align', 'set-header-row', 'set-header-col', 'set-escape-newline', 'set-keep-whitespace'].forEach(id => {
+        addEvt(id, 'change', processData);
+    });
+
+    addEvt('btn-convert', 'click', processData);
+
+    addEvt('btn-clear', 'click', () => {
+        if (els.input) els.input.value = '';
+        processData();
+    });
+
+    // File Import
+    addEvt('btn-import', 'click', () => {
+        if (els.fileInput) els.fileInput.click();
+    });
+
+    addEvt('file-input', 'change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            if (els.input) {
+                els.input.value = ev.target.result;
+                processData();
+            }
+        };
+        reader.onerror = () => {
+            if (els.errorMsg) {
+                els.errorMsg.textContent = 'ファイルの読み込みに失敗しました。';
+                els.errorMsg.style.display = 'block';
+            }
+        };
+        reader.readAsText(file, 'UTF-8');
+        // Reset input value to allow selecting the same file again
+        e.target.value = '';
+    });
+
+    // Copy to Clipboard
+    addEvt('btn-copy', 'click', async () => {
+        if (!els.output || !els.btnCopy) return;
+        
+        const textToCopy = els.output.value;
+        if (!textToCopy) return;
+
+        const originalHtml = els.btnCopy.innerHTML;
+        const successHtml = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg> コピーしました！`;
+
+        try {
+            if (navigator.clipboard && window.isSecureContext) {
+                await navigator.clipboard.writeText(textToCopy);
+            } else {
+                // Fallback
+                els.output.classList.remove('hidden'); // hiddenだと選択できない場合がある
+                els.output.select();
+                document.execCommand('copy');
+                // 選択解除とビューの復元
+                window.getSelection().removeAllRanges();
+                if(currentView === 'preview') switchView('preview');
+            }
+            
+            els.btnCopy.innerHTML = successHtml;
+            els.btnCopy.classList.add('success');
+            setTimeout(() => {
+                els.btnCopy.innerHTML = originalHtml;
+                els.btnCopy.classList.remove('success');
+            }, 2000);
+
+        } catch (err) {
+            console.error('Copy failed', err);
+            alert('クリップボードへのコピーに失敗しました。テキストエリアを選択して手動でコピーしてください。');
+        }
+    });
+
+    // Tabs
+    addEvt('tab-markdown', 'click', () => switchView('markdown'));
+    addEvt('tab-preview', 'click', () => switchView('preview'));
+
+    // Initial parsing if there's text (e.g. browser back button retained value)
+    window.addEventListener('DOMContentLoaded', () => {
+        if (els.input && els.input.value.trim() !== '') {
+            processData();
+        }
+    });
+
+</script>
+</body>
+</html>
